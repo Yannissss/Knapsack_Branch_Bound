@@ -40,6 +40,7 @@ void knapsack_new(knapsack_t* sack, int num_objects, int max_volume, int* values
         constraints[i] = (double)volumes[i - 1];
     }
 
+    glp_term_out(GLP_OFF);
     glp_load_matrix(pb, num_objects, rows, cols, constraints);
 
     // Problème GLPK
@@ -63,7 +64,7 @@ void knapsack_new(knapsack_t* sack, int num_objects, int max_volume, int* values
 
     sack->max_quantities = knapsack_max_quantities(sack);
     sack->sorted_by_density = knapsack_sort_by_density(sack);
-    sack->initial_bound = knapsack_initial_bound(sack);
+    sack->initial_bound = knapsack_initial_bound(sack, NULL);
 }
 
 void knapsack_drop(knapsack_t* sack) {
@@ -120,10 +121,6 @@ int* knapsack_sort_by_density(knapsack_t* sack) {
     for (int i = 0; i < sack->num_objects; i++)
         sorted_by_density[i] = i;
 
-    // for (int i = 0; i < sack->num_objects; i++)
-    //     printf("(%d, %f) ", sorted_by_density[i], sack->densities[sorted_by_density[i]]);
-    // printf("\n");
-
     // Tri par insertion
     int j;
     for (int i = 1; i < sack->num_objects; i++) {
@@ -136,14 +133,10 @@ int* knapsack_sort_by_density(knapsack_t* sack) {
         sorted_by_density[j] = i;
     }
 
-    // for (int i = 0; i < sack->num_objects; i++)
-    //     printf("(%d, %f) ", sorted_by_density[i], sack->densities[sorted_by_density[i]]);
-    // printf("\n");
-
     return sorted_by_density;
 }
 
-int knapsack_initial_bound(knapsack_t* sack) {
+int knapsack_initial_bound(knapsack_t* sack, int* store_solution) {
     int volume = sack->max_volume;
     int value = 0;
 
@@ -152,6 +145,8 @@ int knapsack_initial_bound(knapsack_t* sack) {
         int quantity = volume / sack->volumes[i];
         volume -= quantity * sack->volumes[i];
         value += quantity * sack->values[i];
+        if (store_solution != NULL)
+            store_solution[i] = quantity;
     }
 
     return value;
@@ -281,76 +276,161 @@ void knapsack_read(knapsack_t* sack, char* filepath) {
     sack->read = 1;
 }
 
-int knapsack_solve(knapsack_t* sack) {
+solution_t knapsack_solve(knapsack_t* sack) {
     // Initialisation
     int bound = sack->initial_bound;
     int eval = sack->initial_eval;
-    layer_t* stack = (layer_t*)malloc(sizeof(layer_t) * sack->num_objects);
+    int depth = 0;
+    int* quantities = (int*)malloc(sizeof(int) * sack->num_objects);
+
+    solution_t solution;
+    solution.num_objects = sack->num_objects;
+    solution.value = bound;
+    solution.quantities = (int*)malloc(sizeof(int) * sack->num_objects);
 
     // L'heuristique est-elle l'optimal ?
-    if (bound >= eval)
-        return bound;
+    if (bound >= eval) {
+        knapsack_initial_bound(sack, solution.quantities);
+        return solution;
+    }
 
     // Push de la première valeur
-    int depth = 0;
-    stack[depth].obj = sack->sorted_by_density[depth];
-    stack[depth].quantity = 0;
-    while (depth >= 0) {
-        printf("depth = %d \n", depth);
-        if (stack[depth].quantity < sack->max_quantities[stack[depth].obj]) {
-            // Explore wider
-            int obj = stack[depth].obj + 1;
-            int quantity = stack[depth].quantity;
+    quantities[depth] = -1;
 
-            printf("x%d = %d \n", obj, quantity);
-            glp_set_col_bnds(sack->pb, obj, GLP_FX, quantity, quantity);
-            glp_simplex(sack->pb, NULL);
-            double eval = glp_get_obj_val(sack->pb);
-            printf("Eval = %f \n", eval);
+    while (depth >= 0) {
+        // Exploration en largeur
+        quantities[depth]++;
+        int max_quantity = sack->max_quantities[sack->sorted_by_density[depth]];
+        int quantity = quantities[depth];
+
+        // Calcul du volume occupé
+        int volume = 0;
+        for (int j = 0; j <= depth; j++) {
+            int i = sack->sorted_by_density[j];
+            volume += sack->volumes[i] * quantities[j];
+        }
+
+        if (KNAPSACK_DEBUG) {
+            printf("----------- \n");
+            printf("depth = %d \n", depth);
+            printf("volume = %d \n", volume);
+            for (int j = 0; j <= depth; j++) {
+                printf("x%d = %d, ", sack->sorted_by_density[j] + 1, quantities[j]);
+            }
+            printf("\n");
+        }
+
+        // Vérifie si la quantité fixée est possible
+        // Et s'il reste de la place dans le sac à dos
+        if (quantity <= max_quantity && volume <= sack->max_volume) {
+
+            // Evaluation
+            double eval = knapsack_eval_branch(sack, depth, quantities);
 
             // Vérifie si la solution est exacte
-            int exact = 1;
-            for (int i = 0; i < sack->num_objects; i++) {
-                double tmp = glp_get_col_prim(sack->pb, i + 1);
-                double _sink;
-                double fracpart = modf(tmp, &_sink);
-                exact = exact && (fracpart < 1e-10);
+            int exact = knapsack_is_relax_exact(sack, depth);
+
+            if (KNAPSACK_DEBUG) {
+                printf("Bound = %d \n", bound);
+                printf("Eval = %f \n", eval);
+                printf("Exact = %d \n", exact);
             }
-            printf("Exact = %d \n", exact);
-            if (exact) {
+
+            if (exact && (int)eval > bound) {
+                // Mise à jour de la borne et exploration en largeur
                 bound = (int)eval;
-                continue;
-            }
 
-            if (eval <= bound) {
-                // Explore wider
-                stack[depth].quantity++;
+                // Mise à jour de la solution optimale
+                solution.value = bound;
+                for (int j = 0; j < sack->num_objects; j++) {
+                    if (depth >= sack->num_objects - 1) {
+                        // On est sur une feuille
+                        solution.quantities[j] = quantities[sack->sorted_by_density[j]];
+                    } else {
+                        // On a fait un simplex
+                        solution.quantities[j] = glp_get_col_prim(sack->pb, j + 1);
+                    }
+                }
+
                 continue;
-            } else if (depth >= sack->num_objects) {
-                // C'est une feuille
-                printf("C'est une feuille!\n");
-                // TODO
-                exit(EXIT_FAILURE);
+            } else if (eval <= bound) {
+                // Exploration en largeur
+                // Pas de mise à jour de la borne
+                continue;
             } else {
-                // Explore deeper
+                // Exploration en profondeur
 
-                // Push new value to stack
-                depth++;
-                stack[depth].obj = sack->sorted_by_density[depth];
-                stack[depth].quantity = 0;
+                // Si on est sur une feuille non
+                if (depth >= sack->num_objects - 1)
+                    // Exploration en largeur
+                    continue;
+                else {
+                    if (KNAPSACK_DEBUG)
+                        printf("=> GO DOWN \n");
+                    depth++;
+                    quantities[depth] = -1;
+                }
             }
+
         } else {
-            // Pop
-            int obj = stack[depth].obj + 1;
-            glp_set_col_bnds(sack->pb, obj, GLP_LO, 0, 0);
+            if (KNAPSACK_DEBUG)
+                printf("=> GO UP \n");
+            glp_set_col_bnds(sack->pb, depth + 1, GLP_LO, 0, 0);
             depth--;
         }
     }
 
     // Clean-up
-    free(stack);
+    free(quantities);
 
-    return bound;
+    return solution;
 }
 
-glp_prob* knapsack_build_matrix(knapsack_t* sack, int depth, layer_t* stack) { return NULL; }
+double knapsack_eval_branch(knapsack_t* sack, int depth, int* quantities) {
+    if (depth >= sack->num_objects - 1) { // On est sur une feuille
+        double eval = 0.0;
+
+        for (int j = 0; j < sack->num_objects; j++) {
+            int i = sack->sorted_by_density[j];
+            eval += quantities[j] * sack->values[i];
+        }
+
+        return eval;
+    } else { // Utilisation du simplexe
+        int quantity = quantities[depth];
+
+        glp_set_col_bnds(sack->pb, depth + 1, GLP_FX, quantity, quantity);
+        glp_simplex(sack->pb, NULL);
+
+        return glp_get_obj_val(sack->pb);
+    }
+}
+
+int knapsack_is_relax_exact(knapsack_t* sack, int depth) {
+    double tmp, sink;
+    int exact = 1;
+
+    if (depth >= sack->num_objects - 1) {
+        exact = 1; // C'est une feuille donc oui
+    } else {
+        for (int i = 0; i < sack->num_objects; i++) {
+            tmp = glp_get_col_prim(sack->pb, i + 1);
+            double fracpart = modf(tmp, &sink);
+            exact = exact && (fracpart < 1e-10);
+        }
+    }
+
+    return exact;
+}
+
+void knapsack_debug(int mode) { KNAPSACK_DEBUG = mode; }
+
+void solution_print(solution_t* solution) {
+    printf("solution_t {\n");
+    printf("    value: %d, \n", solution->value);
+    printf("    quantities: ");
+    print_veci(solution->quantities, solution->num_objects);
+    printf("\n}\n");
+}
+
+void solution_drop(solution_t* solution) { free(solution->quantities); }

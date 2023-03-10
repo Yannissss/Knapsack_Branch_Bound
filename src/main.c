@@ -1,28 +1,38 @@
 #include <glpk.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "knapsack.h"
 
-/* Problème:
-Maximiser: 15 x1 + 12 x2 + 2 x3 + 8 x4
-Avec: 5 x1 + 3 x2 + 2 x3 + 4 x4 <= 14
-*/
-int main(void) {
+int main(int argc, char** argv) {
     knapsack_t sack;
+    solution_t sol;
+    char* filepath = NULL;
 
-    // int values[4] = {15, 12, 2, 8};
-    // int volumes[4] = {5, 3, 2, 4};
-    // knapsack_new(&sack, 4, 14, values, volumes);
+    if (argc > 1) {
+        filepath = argv[1];
+        knapsack_debug(0);
+        if (argc > 2 && (strcmp("-d", argv[2]) == 0))
+            knapsack_debug(1);
+    } else {
+        printf("Usage: \n");
+        printf("%s [pb_file] [-d ?]\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
 
-    knapsack_read(&sack, "sacks/prob_sac_1.txt");
+    knapsack_read(&sack, filepath);
 
+    printf("Knapsack = ");
     knapsack_print(&sack);
 
-    int solution = knapsack_solve(&sack);
-    printf("Solution = %d \n", solution);
+    sol = knapsack_solve(&sack);
+
+    printf("Optimum = ");
+    solution_print(&sol);
 
     knapsack_drop(&sack);
+    solution_drop(&sol);
 
-    return 0;
+    return EXIT_SUCCESS;
 }

@@ -4,6 +4,8 @@
 #include <glpk.h>
 #include <stdlib.h>
 
+static int KNAPSACK_DEBUG = 1;
+
 // Structure qui contient toutes les données nécéssaires au fonctionnement
 // du sac à dos
 typedef struct {
@@ -25,11 +27,16 @@ typedef struct {
     int* sorted_by_density;
 } knapsack_t;
 
-// Structure qui représente un niveau de l'algorithme de Branch & Bound
+// Structure qui contient la solution du problème d'optimisation du sac à dos
+// Par méthode Branch & Bound
 typedef struct {
-    int obj;      // Indice de l'objet incrémenté
-    int quantity; // Quantité prise de l'objet
-} layer_t;
+    int num_objects;
+    int value;
+    int* quantities;
+} solution_t;
+
+// Active/désactive le mode debug pour le solver
+void knapsack_debug(int mode);
 
 // Crée un sac à dos avec les données du problème
 void knapsack_new(knapsack_t* sack, int num_objects, int max_volume, int* values, int* volumes);
@@ -50,7 +57,7 @@ int* knapsack_max_quantities(knapsack_t* sack);
 int* knapsack_sort_by_density(knapsack_t* sack);
 
 // Heuristique pour obtenir la borne initiale
-int knapsack_initial_bound(knapsack_t* sack);
+int knapsack_initial_bound(knapsack_t* sack, int* store_solution);
 
 // Affiche le contenu de la structure sac à dos pour de debug
 void knapsack_print(knapsack_t* sack);
@@ -59,10 +66,19 @@ void knapsack_print(knapsack_t* sack);
 void knapsack_read(knapsack_t* sack, char* filepath);
 
 // Résout le problème du sac à dos
-int knapsack_solve(knapsack_t* sack);
+solution_t knapsack_solve(knapsack_t* sack);
 
-// Construit le problème linéaire associé au problème initial en plus
-// Des valeurs des variables déjà fixé
-glp_prob* knapsack_build_matrix(knapsack_t* sack, int depth, layer_t* stack);
+// Evalue un branche (feuille ou branche partielle) dans
+// l'algorithme de Branch & Bound
+double knapsack_eval_branch(knapsack_t* sack, int depth, int* quantities);
+
+// Vérifie si une relaxation par le simplexe est exacte
+int knapsack_is_relax_exact(knapsack_t* sack, int depth);
+
+// Affiche la solution obtenue par le solveur
+void solution_print(solution_t* solution);
+
+// Détruit la mémoire allouée pour la solution
+void solution_drop(solution_t* solution);
 
 #endif /* __KNAPSACK_H__ */
