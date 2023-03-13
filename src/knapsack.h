@@ -22,6 +22,7 @@ typedef struct {
     // Heuristiques
     double* densities;
     int initial_bound;
+    int* initial_solution;
     double initial_eval;
     int* max_quantities;
     int* sorted_by_density;
@@ -57,7 +58,7 @@ int* knapsack_max_quantities(knapsack_t* sack);
 int* knapsack_sort_by_density(knapsack_t* sack);
 
 // Heuristique pour obtenir la borne initiale
-int knapsack_initial_bound(knapsack_t* sack, int* store_solution);
+int knapsack_initial_bound(knapsack_t* sack);
 
 // Affiche le contenu de la structure sac à dos pour de debug
 void knapsack_print(knapsack_t* sack);

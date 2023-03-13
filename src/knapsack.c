@@ -64,7 +64,9 @@ void knapsack_new(knapsack_t* sack, int num_objects, int max_volume, int* values
 
     sack->max_quantities = knapsack_max_quantities(sack);
     sack->sorted_by_density = knapsack_sort_by_density(sack);
-    sack->initial_bound = knapsack_initial_bound(sack, NULL);
+
+    sack->initial_solution = (int*)malloc(sizeof(int) * num_objects);
+    sack->initial_bound = knapsack_initial_bound(sack);
 }
 
 void knapsack_drop(knapsack_t* sack) {
@@ -75,6 +77,7 @@ void knapsack_drop(knapsack_t* sack) {
     free(sack->densities);
     free(sack->max_quantities);
     free(sack->sorted_by_density);
+    free(sack->initial_solution);
     if (sack->read) {
         free(sack->volumes);
         free(sack->values);
@@ -136,7 +139,7 @@ int* knapsack_sort_by_density(knapsack_t* sack) {
     return sorted_by_density;
 }
 
-int knapsack_initial_bound(knapsack_t* sack, int* store_solution) {
+int knapsack_initial_bound(knapsack_t* sack) {
     int volume = sack->max_volume;
     int value = 0;
 
@@ -145,8 +148,7 @@ int knapsack_initial_bound(knapsack_t* sack, int* store_solution) {
         int quantity = volume / sack->volumes[i];
         volume -= quantity * sack->volumes[i];
         value += quantity * sack->values[i];
-        if (store_solution != NULL)
-            store_solution[i] = quantity;
+        sack->initial_solution[i] = quantity;
     }
 
     return value;
@@ -285,12 +287,15 @@ solution_t knapsack_solve(knapsack_t* sack) {
 
     solution_t solution;
     solution.num_objects = sack->num_objects;
+
+    // Recopie de la solution initial
     solution.value = bound;
     solution.quantities = (int*)malloc(sizeof(int) * sack->num_objects);
+    for (int i = 0; i < sack->num_objects; i++)
+        solution.quantities[i] = sack->initial_solution[i];
 
     // L'heuristique est-elle l'optimal ?
     if (bound >= eval) {
-        knapsack_initial_bound(sack, solution.quantities);
         return solution;
     }
 
