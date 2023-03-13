@@ -283,7 +283,10 @@ solution_t knapsack_solve(knapsack_t* sack) {
     int bound = sack->initial_bound;
     int eval = sack->initial_eval;
     int depth = 0;
+
     int* quantities = (int*)malloc(sizeof(int) * sack->num_objects);
+    for (int i = 0; i < sack->num_objects; i++)
+        quantities[i] = 0;
 
     solution_t solution;
     solution.num_objects = sack->num_objects;
@@ -421,7 +424,7 @@ int knapsack_is_relax_exact(knapsack_t* sack, int depth) {
         for (int i = 0; i < sack->num_objects; i++) {
             tmp = glp_get_col_prim(sack->pb, i + 1);
             double fracpart = modf(tmp, &sink);
-            exact = exact && (fracpart < 1e-10);
+            exact = exact && (fracpart == 0 && tmp >= 0);
         }
     }
 
