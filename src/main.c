@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "knapsack.h"
 
@@ -26,7 +27,12 @@ int main(int argc, char** argv) {
     printf("Knapsack = ");
     knapsack_print(&sack);
 
+    clock_t start = clock();
     sol = knapsack_solve(&sack);
+    clock_t end = clock();
+    float seconds = (float)(end - start) / CLOCKS_PER_SEC;
+    fprintf(stderr, "%d, %f\n", sol.value, seconds);
+
 
     printf("Optimum = ");
     solution_print(&sol);
